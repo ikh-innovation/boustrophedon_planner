@@ -8,23 +8,16 @@ and returns a `StripingPlan` message which contains a list of waypoints to strip
 ![Sample Boustrophedon Plan](half-y-turn-concave.png)
 
 ### Instructions
+
 run the server using:
 ```
 roslaunch boustrophedon_server boustrophedon_server.launch
 ```
+In its current form, the launch file requires the IKH ```aristos_maps``` package to load an actual map and run. Replace it if necessary.
 
-The server waits for an actionlib service call of type `boustrophedon_msgs/PlanMowingPathGoal ` containing a `geometry_msgs/PolygonStamped`
-and a `geometry_msgs/PoseStamped`. It will then return the striping path in a `StripingPlan` message as the actionlib server result.
+In the Rviz window publish as many points as desired to form a polygon. Then, publish a pose estimate that corresponds to the robot's initial position. The orientation defined is the orientation of the produced stripes, if of course the relative flag is activated.
 
-For testing, you can use the client node by running:
-```
-rosrun boustrophedon_server boustrophedon_planner_client
-```
-
-The client loads a hard-coded polygon. It then waits for a message over the `/initialpose` topic (can be sent using rviz `2D Pose Estimate`).
-Once sent, the client will get the result, conect it to path and publish it to `result_path`.
-The polygon is published to `input_polygon` for convenience.
-
+After the path is produced, the user is asked to input a name for area. It is suggested to use a unique name that has some logical connection with the area. A list with the names the user has already used appears for convenience. After selecting and typing the name press enter to finalize the process and input the next polygon. The path is saved in the parameter server, from where it can be accessed or dumped in a yaml file.  
 
 ## Changelog
 
