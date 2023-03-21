@@ -15,12 +15,18 @@
 #include "boustrophedon_server/outline_planner.h"
 #include "cellular_decomposition/polygon_decomposer.h"
 
+#include <dynamic_reconfigure/server.h>
+#include <boustrophedon_server/BoustrophedonParametersConfig.h>
+
 class BoustrophedonPlannerServer
 {
 public:
   BoustrophedonPlannerServer();
 
   void executePlanPathAction(const boustrophedon_msgs::PlanMowingPathGoalConstPtr& goal);
+
+  void setParameters(boustrophedon_server::BoustrophedonParametersConfig &config);
+
 
 private:
   using Server = actionlib::SimpleActionServer<boustrophedon_msgs::PlanMowingPathAction>;
@@ -46,6 +52,7 @@ private:
   double intermediary_separation_{};
   double stripe_angle_{};
   bool travel_along_boundary_{};
+  bool return_to_start_{};
   bool allow_points_outside_boundary_{};
   bool enable_half_y_turns_{};
   int points_per_turn_{};

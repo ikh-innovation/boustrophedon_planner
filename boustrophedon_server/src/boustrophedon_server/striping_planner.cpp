@@ -8,14 +8,58 @@ void StripingPlanner::setParameters(StripingPlanner::Parameters parameters)
   params_ = parameters;
 }
 
-void StripingPlanner::addToPath(const Polygon& polygon, const Polygon& sub_polygon, Point& robot_position,
+void StripingPlanner::addToPath(const Polygon& whole_polygon, const Polygon& polygon, const Polygon& sub_polygon, Point& robot_position,
                                 std::vector<NavPoint>& path)
 {
-  std::vector<NavPoint> new_path_section;
 
+  std::vector<NavPoint> new_path_section;
   fillPolygon(sub_polygon, new_path_section, robot_position);
 
-  if (params_.travel_along_boundary)
+  // Need to check if travelling to next polygon will cross free space. If yes,
+  // the path has to be calculated with travel_along_boundary set to True,
+  // regardless of user selection.
+  bool override_travel {false};
+
+  // NOTE 1: For debugging purposes, activate  the behavior through the return to start parameter.
+
+  // NOTE 2: Probably should deactivate the check in case the travel along boundary flag is True.
+  // Replace the params_.return_to_start with !params.travel_along_boundary
+
+  // NOTE 3: This check hits also when the robot travels from its initial position
+  // to mow the first polygon. This is a case that SHOULD normally cross free space without
+  // causing issues with obstacles.
+  
+  if ((params_.return_to_start) && (!on_first_poly_))
+  { 
+    double incl { (new_path_section.front().point.y() - robot_position.y())/(new_path_section.front().point.x() - robot_position.x())}; 
+    for (double x_coord = std::min(new_path_section.front().point.x(), robot_position.x()) ; x_coord < std::max(new_path_section.front().point.x(), robot_position.x()); x_coord = x_coord + 0.1)
+    {
+      double y_coord {incl*(x_coord - new_path_section.front().point.x()) + new_path_section.front().point.y()};
+      Point midpoint {x_coord, y_coord };
+      if (CGAL::bounded_side_2(whole_polygon.vertices_begin(), whole_polygon.vertices_end(), midpoint) == CGAL::ON_BOUNDED_SIDE) 
+      {
+        std::cout << "Point is inside the polygon.\n";
+      }
+      else if (CGAL::bounded_side_2(whole_polygon.vertices_begin(), whole_polygon.vertices_end(), midpoint) == CGAL::ON_BOUNDARY)
+      {
+        std::cout << "Point is on the polygon boundary, have to retest.\n";
+      }
+      else if (CGAL::bounded_side_2(whole_polygon.vertices_begin(), whole_polygon.vertices_end(), midpoint) == CGAL::ON_UNBOUNDED_SIDE)
+      {
+        std::cout << "Point is outside the polygon.\n";
+        override_travel = true ;
+        break;
+      }
+    }
+  }
+  else
+  {
+    on_first_poly_ = false ;
+  }
+
+  std::vector<Point> starting_points = getIntersectionPoints(polygon, Line(robot_position, new_path_section.front().point));
+
+  if ((params_.travel_along_boundary) || (override_travel))
   {
     std::vector<NavPoint> start_to_striping =
         getOutlinePathToPoint(polygon, robot_position, new_path_section.front().point);
@@ -43,21 +87,74 @@ void StripingPlanner::fillPolygon(const Polygon& polygon, std::vector<NavPoint>&
   auto min_x = left_vertex.x();
   auto max_x = CGAL::right_vertex_2(polygon.container().begin(), polygon.container().end())->x();
 
-  auto stripe_count = static_cast<int>(std::round(CGAL::to_double(max_x - min_x) / params_.stripe_separation)) + 1;
+  // auto stripe_count = static_cast<int>(std::round(CGAL::to_double(max_x - min_x) / params_.stripe_separation)) + 1;
+  std::cout <<"first : " << CGAL::to_double(max_x - min_x) / params_.stripe_separation << std::endl;
+  std::cout <<"second : " << std::round(CGAL::to_double(max_x - min_x) / params_.stripe_separation) << std::endl;
+  std::cout <<"third : " << static_cast<int>(std::round(CGAL::to_double(max_x - min_x) / params_.stripe_separation)) << std::endl;
+  std::cout <<"fourth : " << static_cast<int>(std::round(CGAL::to_double(max_x - min_x) / params_.stripe_separation)) + 1 << std::endl;
 
+  // std::cout <<"Calculated number of passes: " << stripe_count << std::endl;
+  double stripe_count{};
+  // ---------------------------------------------------------------------------------------------------------------
+  bool DB {true};
+  // Width of cutting tools
+  double w_c {1.0};
+  // Corridor width
+  double lat_dist {CGAL::to_double(max_x - min_x)}; 
+  if (lat_dist < w_c)
+  {
+    if (DB) std::cout << "Available lateral corridor distance smaller than width of cutting tools. Robot does not fit. Subarea will be excluded." << std::endl;
+  }
+
+  // Maximum step size. Areas' overlap value can be calculated by (w_c-step) or ((w_c - step)/w_c) as a percentage.
+  // We set a maximum step size to ensure a minimum overlap value.
+  double step_max {params_.stripe_separation};
+  if (step_max > w_c)
+  {
+    if (DB) std::cout << "Erroneous maximum step definition, larger that the cut width. Reducing to cut width to ensure there is marginal overlap between passes." << std::endl;
+    // Even better, reduce it to a percentage of the cut width, for example 0.9*w_c
+    step_max = w_c;
+  }
+
+  // To find the optimum pass number, divide the width by the maximum step size and round up the result to the closest higher integer.
+  // For example, 5.37 passes mean that we should do 6. If we did 5, the actual step size would increase further. 
+  
+  if (step_max != 0.0)
+  {
+    stripe_count = std::ceil((lat_dist - w_c )/step_max) + 1.0 ;
+  }
+  else
+  {
+    if (DB) std::cout << "Erroneous maximum step definition, equal to 0. Check input values." << std::endl;
+  }
+
+  if (DB) std::cout <<"Calculated number of passes: " << stripe_count << std::endl;
+      
+  // Then calculate the actual step size that will be used based on the pass number value.
+  if ((stripe_count - 1.0) != 0.0)
+  {
+    params_.stripe_separation = (lat_dist - w_c)/(stripe_count - 1.0);
+  }
+  else
+  {
+    if (DB) std::cout << "A single pass is required." << std::endl;
+  }
+  if (DB) std::cout << "Optimum onepass step is: " << params_.stripe_separation << std::endl;
+  // ---------------------------------------------------------------------------------------------------------------
+  
   StripingDirection stripe_dir = StripingDirection::STARTING;
 
   bool left_closest = isLeftClosest(polygon, robot_position, min_x, max_x);
-  for (auto stripe_num = 0; stripe_num < stripe_count; stripe_num++)
+  for (auto stripe_num = 0; stripe_num < (stripe_count); stripe_num++)
   {
     double x;
     if (left_closest)
     {
-      x = min_x + (stripe_num * params_.stripe_separation);
+      x = min_x + w_c/2.0 + (stripe_num * params_.stripe_separation);
     }
     else
     {
-      x = max_x - (stripe_num * params_.stripe_separation);
+      x = max_x - w_c/2.0 - (stripe_num * params_.stripe_separation);
     }
 
     auto intersections = getIntersectionPoints(polygon, Line(Point(x, 0.0), Point(x, 1.0)));
@@ -151,7 +248,6 @@ void StripingPlanner::addIntermediaryPoints(std::vector<Point>& intersections)
 
   int intermediary_count =
       static_cast<int>(std::trunc((upper_point.y() - lower_point.y()) / params_.intermediary_separation));
-
   // start the loop at 1. We don't want to repeat a point on the ends of the line segment.
   for (int i = 1; i < intermediary_count; i++)
   {

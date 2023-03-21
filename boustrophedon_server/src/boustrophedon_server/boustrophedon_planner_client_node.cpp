@@ -1,4 +1,5 @@
 #include <ros/ros.h>
+#include <string>
 #include <actionlib/client/simple_action_client.h>
 #include <actionlib/client/terminal_state.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
@@ -9,6 +10,7 @@
 #include <geometry_msgs/PolygonStamped.h>
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/PointStamped.h>
 
 geometry_msgs::Quaternion headingToQuaternion(double x, double y, double z);
 
@@ -65,11 +67,58 @@ bool convertStripingPlanToPath(const boustrophedon_msgs::StripingPlan& striping_
 
 bool got_initial_pose = false;
 geometry_msgs::PoseStamped initial_pose;
+boustrophedon_msgs::PlanMowingPathGoal goal;
+int point_num {0};
+
+
 void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr init_pose)
 {
-  initial_pose.header = init_pose->header;
-  initial_pose.pose = init_pose->pose.pose;
-  got_initial_pose = true;
+  // Uncomment the following if you want the initial pose to be a point of the polygon
+  //----------------------------------------------------------------------------------
+  // if (point_num > 1)
+  // {
+  //   ROS_INFO_STREAM("Got final point which corresponds to initial position.");
+  //   initial_pose.header = init_pose->header;
+  //   initial_pose.pose = init_pose->pose.pose;
+  //   got_initial_pose = true;
+
+  //   goal.property.polygon.points.resize(point_num+1);
+  //   goal.property.polygon.points[point_num].x = init_pose->pose.pose.position.x;
+  //   goal.property.polygon.points[point_num].y = init_pose->pose.pose.position.y;
+  //   ROS_INFO("Total point number is : %i", point_num+1);
+  //   point_num = 0 ;
+  // }
+  // else
+  // {
+  //   ROS_INFO("You have only entered %i point(s). Clearing point list and starting over...", point_num+1);
+  //   point_num = 0 ;
+  // }
+  //----------------------------------------------------------------------------------
+
+  if (point_num > 1)
+  {
+    ROS_INFO_STREAM("Got initial position.");
+    initial_pose.header = init_pose->header;
+    initial_pose.pose = init_pose->pose.pose;
+    got_initial_pose = true;
+    ROS_INFO("Total point number is : %i", point_num+1);
+    point_num = 0 ;
+  }
+  else
+  {
+    ROS_INFO("You have only entered %i point(s). Clearing point list and starting over...", point_num+1);
+    point_num = 0 ;
+  }
+}
+
+void addPolygonPointCallback(const geometry_msgs::PointStampedConstPtr new_point)
+{
+  ROS_INFO_STREAM("Got new point");
+  goal.property.polygon.points.resize(point_num+1);
+  goal.property.polygon.points[point_num].x = new_point->point.x;
+  goal.property.polygon.points[point_num].y = new_point->point.y;
+  point_num++;
+  ROS_INFO("Total point number is : %i", point_num);
 }
 
 int main(int argc, char** argv)
@@ -86,6 +135,8 @@ int main(int argc, char** argv)
   ros::Subscriber init_pose =
       n.subscribe<geometry_msgs::PoseWithCovarianceStamped>("/initialpose", 1, initialPoseCallback);
 
+  ros::Subscriber add_points =
+      n.subscribe<geometry_msgs::PointStamped>("/clicked_point", 1, addPolygonPointCallback);
   ros::Rate loop_rate(10);
 
   ROS_INFO("Waiting for action server to start.");
@@ -93,32 +144,18 @@ int main(int argc, char** argv)
   client.waitForServer();  // will wait for infinite time
 
   ROS_INFO("Action server started");
-
-  boustrophedon_msgs::PlanMowingPathGoal goal;
-
-  goal.property.header.stamp = ros::Time::now();
-  goal.property.header.frame_id = "map";
-
-  goal.property.polygon.points.resize(4);
-  goal.property.polygon.points[0].x = 0;
-  goal.property.polygon.points[0].y = 0;
-  goal.property.polygon.points[1].x = 0;
-  goal.property.polygon.points[1].y = 10;
-  goal.property.polygon.points[2].x = 10;
-  goal.property.polygon.points[2].y = 10;
-  goal.property.polygon.points[3].x = 10;
-  goal.property.polygon.points[3].y = 0;
-
-  goal.robot_position.pose.orientation.w = 1.0;
-
-  polygon_pub.publish(goal.property);
-
-  ROS_INFO_STREAM("Waiting for goal");
-
+  ROS_INFO("Waiting for polygon points. Need at least 3 to form a polygon...");
+  std::vector<std::string> saved_areas {};
+  std::vector<nav_msgs::Path> all_paths;
   while (ros::ok())
   {
     if (got_initial_pose)
     {
+      goal.property.header.stamp = ros::Time::now();
+      goal.property.header.frame_id = "map";
+      polygon_pub.publish(goal.property);
+
+      goal.robot_position.pose.orientation.w = 1.0;
       goal.robot_position = initial_pose;
       // goal.robot_position.header = goal.property.header;
       // goal.robot_position.pose.position.x = 1.0;
@@ -130,7 +167,7 @@ int main(int argc, char** argv)
       ROS_INFO_STREAM("Sending goal");
 
       // wait for the action to return
-      bool finished_before_timeout = client.waitForResult(ros::Duration(30.0));
+      bool finished_before_timeout = client.waitForResult(ros::Duration(300.0));
 
       if (!finished_before_timeout)
       {
@@ -144,11 +181,58 @@ int main(int argc, char** argv)
       std::cout << "Result with : " << result->plan.points.size() << std::endl;
 
       nav_msgs::Path path;
+      
       convertStripingPlanToPath(result->plan, path);
 
-      path_pub.publish(path);
+      for (int i=0; i < result->plan.points.size()-1; i++)
+      {
+        nav_msgs::Path partial_path {};
+        partial_path.header.stamp = path.header.stamp;
+        partial_path.header.frame_id = path.header.frame_id;
+        partial_path.poses.push_back(path.poses[i]);
+        partial_path.poses.push_back(path.poses[i+1]);
+        path_pub.publish(partial_path);
+        ros::Duration(0.2).sleep();
+      }
+
+
+      std::cout << "Enter a name for the specified area trajectory. Names you have already used are : \n \" " << std::endl;
+      for (auto name : saved_areas){
+        std::cout << name << std::endl;
+      }
+      std::cout << " \" " << std::endl;
+
+      std::string area_name {}; 
+      std::cout << "New name is : " ; 
+      std::cin >> area_name ;
+      saved_areas.push_back(area_name);
+      std::vector<double> path_x {};
+      std::vector<double> path_y {};
+      std::vector<double> path_yaw {};
+      std::vector<double> path_back_ind {};
+
+      for (int i=0; i < result->plan.points.size()-1; i++)
+      {
+        path_x.push_back(path.poses[i].pose.position.x);
+        path_y.push_back(path.poses[i].pose.position.y);
+        path_yaw.push_back(0);
+        path_back_ind.push_back(0);
+      }
+      n.setParam(area_name + "/x_path", path_x);
+      n.setParam(area_name + "/y_path", path_y);
+      n.setParam(area_name + "/yaw_path", path_yaw);
+      n.setParam(area_name + "/back_ind", path_back_ind);
+
+      all_paths.push_back(path);
+      for (auto p : all_paths){
+        
+        path_pub.publish(p);
+        ros::Duration(0.2).sleep();
+      }
+      std::cout << "Path saved successfully, ready to accept next area." << std::endl;
 
       got_initial_pose = false;
+      goal = {};
     }
     ros::spinOnce();
     loop_rate.sleep();

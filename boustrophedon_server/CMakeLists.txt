@@ -11,7 +11,16 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   nav_msgs
   rosparam_shortcuts
+  dynamic_reconfigure
   )
+
+#add dynamic reconfigure api
+#find_package(catkin REQUIRED dynamic_reconfigure)
+generate_dynamic_reconfigure_options(
+  cfg/parameters.cfg
+)
+
+
 
 find_package(CGAL REQUIRED COMPONENTS Core)
 catkin_package(
@@ -31,6 +40,8 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
+
+
 add_executable(boustrophedon_planner_server
   src/boustrophedon_server/boustrophedon_planner_node.cpp
   src/boustrophedon_server/boustrophedon_planner_server.cpp
@@ -47,9 +58,18 @@ target_link_libraries(boustrophedon_planner_server
   CGAL::CGAL_Core)
 add_dependencies(boustrophedon_planner_server ${catkin_EXPORTED_TARGETS})
 
+# make sure configure headers are built before any node using them
+add_dependencies(boustrophedon_planner_server ${PROJECT_NAME}_gencfg)
+
 add_executable(boustrophedon_planner_client
   src/boustrophedon_server/boustrophedon_planner_client_node.cpp
   )
+
+
+
+
+
+
 target_link_libraries(boustrophedon_planner_client
   ${catkin_LIBRARIES}
   CGAL::CGAL

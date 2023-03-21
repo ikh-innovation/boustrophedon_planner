@@ -28,6 +28,8 @@ BoustrophedonPlannerServer::BoustrophedonPlannerServer()
                                                              "enable_stripe_angle_orientation", enable_orientation_));
   error += static_cast<std::size_t>(
       !rosparam_shortcuts::get("plan_path", private_node_handle_, "travel_along_boundary", travel_along_boundary_));
+  error += static_cast<std::size_t>(
+      !rosparam_shortcuts::get("plan_path", private_node_handle_, "return_to_start", return_to_start_));
   error += static_cast<std::size_t>(!rosparam_shortcuts::get(
       "plan_path", private_node_handle_, "allow_points_outside_boundary", allow_points_outside_boundary_));
   error += static_cast<std::size_t>(
@@ -65,7 +67,7 @@ BoustrophedonPlannerServer::BoustrophedonPlannerServer()
   }
 
   striping_planner_.setParameters({ stripe_separation_, intermediary_separation_, travel_along_boundary_,
-                                    enable_half_y_turns_, points_per_turn_, turn_start_offset_ });
+                                    return_to_start_, enable_half_y_turns_, points_per_turn_, turn_start_offset_ });
   outline_planner_.setParameters(
       { repeat_boundary_, outline_clockwise_, skip_outlines_, outline_layer_count_, stripe_separation_ });
 
@@ -83,6 +85,29 @@ BoustrophedonPlannerServer::BoustrophedonPlannerServer()
     path_points_publisher_ = private_node_handle_.advertise<geometry_msgs::PointStamped>("path_points", 1000);
     polygon_points_publisher_ = private_node_handle_.advertise<geometry_msgs::PointStamped>("polygon_points", 1000);
   }
+}
+
+void BoustrophedonPlannerServer::setParameters(boustrophedon_server::BoustrophedonParametersConfig &config)
+{
+  repeat_boundary_ = config.repeat_boundary;
+  outline_layer_count_ = config.outline_layer_count;
+  stripe_separation_ = config.stripe_separation;
+  intermediary_separation_ = config.intermediary_separation;
+  stripe_angle_ = config.stripe_angle;
+  outline_clockwise_ = config.outline_clockwise;
+  skip_outlines_ = config.skip_outlines;
+  enable_orientation_ = config.enable_stripe_angle_orientation;
+  travel_along_boundary_ = config.travel_along_boundary;
+  return_to_start_ = config.return_to_start;
+  allow_points_outside_boundary_ = config.allow_points_outside_boundary;
+  enable_half_y_turns_ = config.enable_half_y_turns;
+  points_per_turn_ =  config.points_per_turn;
+  turn_start_offset_ = config.turn_start_offset;
+
+  striping_planner_.setParameters({ stripe_separation_, intermediary_separation_, travel_along_boundary_,
+                                    return_to_start_, enable_half_y_turns_, points_per_turn_, turn_start_offset_ });
+  outline_planner_.setParameters(
+      { repeat_boundary_, outline_clockwise_, skip_outlines_, outline_layer_count_, stripe_separation_ });
 }
 
 void BoustrophedonPlannerServer::executePlanPathAction(const boustrophedon_msgs::PlanMowingPathGoalConstPtr& goal)
@@ -150,12 +175,16 @@ void BoustrophedonPlannerServer::executePlanPathAction(const boustrophedon_msgs:
     merged_polygon = mergePolygons(merged_polygon, subpoly);
 
     // add the stripes to the path, using merged_polygon boundary to travel if necessary.
-    striping_planner_.addToPath(merged_polygon, subpoly, robot_position, path);
+    striping_planner_.addToPath(fill_polygon, merged_polygon, subpoly, robot_position, path);
   }
-  if (travel_along_boundary_)
+
+  if (return_to_start_)
   {
     striping_planner_.addReturnToStart(merged_polygon, start_position, robot_position, path);
   }
+
+  striping_planner_.on_first_poly_ = true ; 
+  
   postprocessPolygonAndPath(preprocess_transform, polygon, path);
   if (publish_path_points_)  // if we care about visualizing the planned path in plotJuggler
   {
@@ -258,7 +287,7 @@ double BoustrophedonPlannerServer::getStripeAngleFromOrientation(const geometry_
   m.getRPY(roll, pitch, yaw);
   ROS_INFO_STREAM("Got Striping Angle from Orientation: " << yaw);
   // TODO: Recalibrate the IMU so that we can get rid of this constant below.
-  return yaw + 1.57079632679;  // Adds PI / 2 to account for incorrect IMU calibration / reference vector
+  return -yaw + 1.57079632679;  // Adds PI / 2 to account for incorrect IMU calibration / reference vector
 }
 
 // publishes the path points one at a time for visualization in plotJuggler
@@ -268,9 +297,11 @@ void BoustrophedonPlannerServer::publishPathPoints(const std::vector<NavPoint>& 
   {
     geometry_msgs::PointStamped stripe_point{};
     stripe_point.header.stamp = ros::Time::now();
+    stripe_point.header.frame_id = "map";
     stripe_point.point.x = point.point.x();
     stripe_point.point.y = point.point.y();
     path_points_publisher_.publish(stripe_point);
+    ros::Duration(0.02).sleep();
     ros::spinOnce();
   }
 }
