@@ -104,6 +104,27 @@ void BoustrophedonPlannerServer::setParameters(boustrophedon_server::Boustrophed
   points_per_turn_ =  config.points_per_turn;
   turn_start_offset_ = config.turn_start_offset;
 
+  if (intermediary_separation_ <= 0.0)
+  {
+    // doesn't make sense, or we don't want intermediaries. set it to double max so we can't make any intermediaries
+    intermediary_separation_ = std::numeric_limits<double>::max();
+  }
+
+  if (enable_half_y_turns_ && outline_layer_count_ < 1)
+  {
+    if (allow_points_outside_boundary_)
+    {
+      ROS_WARN_STREAM("Current configuration will result in turns that go outside the boundary, but this has been "
+                      "explicitly enabled");
+    }
+    else
+    {
+      // we can't do half-y-turns safely without an inner boundary layer, as the arc will stick outside of the boundary
+      ROS_ERROR_STREAM("Cannot plan using half-y-turns if the outline_layer_count is less than 1! Check and fix the input values.");
+      return;
+    }
+  }
+
   striping_planner_.setParameters({ max_stripe_separation_, intermediary_separation_, travel_along_boundary_,
                                     return_to_start_, enable_half_y_turns_, points_per_turn_, turn_start_offset_ });
   outline_planner_.setParameters(
