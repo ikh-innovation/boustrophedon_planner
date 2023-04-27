@@ -10,9 +10,10 @@ class StripingPlanner
 public:
   struct Parameters
   {
-    // Center-to-center distance (in meters) between passes in the coverage path.
+
+    // Maximum center-to-center distance (in meters) between passes in the coverage path.
     // Applies to both outline and fill portions.
-    double stripe_separation = 0.5;
+    double max_stripe_separation = 0.9;
 
     // Distance between intermediary waypoints along a stripe
     // Defaults to max double, so it doesn't stripe unless you have a REALLY big boundary
@@ -54,6 +55,10 @@ private:
   };
 
   Parameters params_;
+
+  // Center-to-center distance (in meters) between passes in the coverage path.
+  // Applies to both outline and fill portions.
+  double stripe_separation  {};
 
   // Constructs the fill portion of the mowing path, which stripes back and
   //  forth over the inner area left after the outline portion is complete.

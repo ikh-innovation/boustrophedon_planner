@@ -8,6 +8,7 @@ Panels:
         - /Status1
         - /Path1
         - /Clicked Points1
+        - /HCPLANNER1
       Splitter Ratio: 0.31949687004089355
     Tree Height: 755
   - Class: rviz/Selection
@@ -57,11 +58,11 @@ Visualization Manager:
     - Alpha: 1
       Class: rviz/Polygon
       Color: 239; 41; 41
-      Enabled: true
+      Enabled: false
       Name: Polygon
       Topic: /input_polygon
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 1
       Buffer Length: 20000
       Class: rviz/Path
@@ -170,6 +171,29 @@ Visualization Manager:
       Unreliable: false
       Use Timestamp: false
       Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 239; 41; 41
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: HCPLANNER
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /aristos/move_base_flex/hc_plan
+      Unreliable: false
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -207,11 +231,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 21.511035919189453
+      Scale: 26.024751663208008
       Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz)
-      X: -171.49032592773438
-      Y: -59.82329177856445
+      X: -8.407814025878906
+      Y: 65.66072845458984
     Saved: ~
 Window Geometry:
   Displays:
@@ -229,5 +253,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1920
-  X: 0
+  X: 1920
   Y: 0

@@ -30,5 +30,6 @@
     </node>
 
     <node type="rviz" name="rviz" pkg="rviz" args="-d $(find boustrophedon_server)/rviz/boustrophedon.rviz" />
-    <node pkg="boustrophedon_server" type="boustrophedon_planner_client" name="boustrophedon_client"  output="screen" />
+    <node pkg="boustrophedon_server" type="boustrophedon_planner_client" name="boustrophedon_client"  output="screen" respawn="true"/>
 </launch>
+ 

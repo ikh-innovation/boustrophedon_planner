@@ -49,6 +49,7 @@ private:
   bool enable_orientation_{};
   int outline_layer_count_{};
   double stripe_separation_{};
+  double max_stripe_separation_{};
   double intermediary_separation_{};
   double stripe_angle_{};
   bool travel_along_boundary_{};

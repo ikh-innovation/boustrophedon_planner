@@ -91,7 +91,7 @@ void BoustrophedonPlannerServer::setParameters(boustrophedon_server::Boustrophed
 {
   repeat_boundary_ = config.repeat_boundary;
   outline_layer_count_ = config.outline_layer_count;
-  stripe_separation_ = config.stripe_separation;
+  max_stripe_separation_ = config.max_stripe_separation;
   intermediary_separation_ = config.intermediary_separation;
   stripe_angle_ = config.stripe_angle;
   outline_clockwise_ = config.outline_clockwise;
@@ -104,10 +104,10 @@ void BoustrophedonPlannerServer::setParameters(boustrophedon_server::Boustrophed
   points_per_turn_ =  config.points_per_turn;
   turn_start_offset_ = config.turn_start_offset;
 
-  striping_planner_.setParameters({ stripe_separation_, intermediary_separation_, travel_along_boundary_,
+  striping_planner_.setParameters({ max_stripe_separation_, intermediary_separation_, travel_along_boundary_,
                                     return_to_start_, enable_half_y_turns_, points_per_turn_, turn_start_offset_ });
   outline_planner_.setParameters(
-      { repeat_boundary_, outline_clockwise_, skip_outlines_, outline_layer_count_, stripe_separation_ });
+      { repeat_boundary_, outline_clockwise_, skip_outlines_, outline_layer_count_, max_stripe_separation_ });
 }
 
 void BoustrophedonPlannerServer::executePlanPathAction(const boustrophedon_msgs::PlanMowingPathGoalConstPtr& goal)

@@ -101,12 +101,12 @@ void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr 
     initial_pose.header = init_pose->header;
     initial_pose.pose = init_pose->pose.pose;
     got_initial_pose = true;
-    ROS_INFO("Total point number is : %i", point_num+1);
+    ROS_INFO("Total point number is : %i", point_num);
     point_num = 0 ;
   }
   else
   {
-    ROS_INFO("You have only entered %i point(s). Clearing point list and starting over...", point_num+1);
+    ROS_INFO("You have only entered %i point(s). Clearing point list and starting over...", point_num + 1);
     point_num = 0 ;
   }
 }
@@ -195,7 +195,6 @@ int main(int argc, char** argv)
         ros::Duration(0.2).sleep();
       }
 
-
       std::cout << "Enter a name for the specified area trajectory. Names you have already used are : \n \" " << std::endl;
       for (auto name : saved_areas){
         std::cout << name << std::endl;
@@ -211,17 +210,21 @@ int main(int argc, char** argv)
       std::vector<double> path_yaw {};
       std::vector<double> path_back_ind {};
 
-      for (int i=0; i < result->plan.points.size()-1; i++)
+      double start_x {path.poses.front().pose.position.x}; 
+      double start_y {path.poses.front().pose.position.y};
+      double start_yaw {};
+
+      for (int i=0; i < result->plan.points.size(); i++)
       {
-        path_x.push_back(path.poses[i].pose.position.x);
-        path_y.push_back(path.poses[i].pose.position.y);
+        path_x.push_back(path.poses[i].pose.position.x - start_x);
+        path_y.push_back(path.poses[i].pose.position.y - start_y);
         path_yaw.push_back(0);
         path_back_ind.push_back(0);
       }
-      n.setParam(area_name + "/x_path", path_x);
-      n.setParam(area_name + "/y_path", path_y);
-      n.setParam(area_name + "/yaw_path", path_yaw);
-      n.setParam(area_name + "/back_ind", path_back_ind);
+      n.setParam("/aristos/move_base_flex/" + area_name + "/x_path", path_x);
+      n.setParam("/aristos/move_base_flex/" + area_name + "/y_path", path_y);
+      n.setParam("/aristos/move_base_flex/" + area_name + "/yaw_path", path_yaw);
+      n.setParam("/aristos/move_base_flex/" + area_name + "/back_ind", path_back_ind);
 
       all_paths.push_back(path);
       for (auto p : all_paths){
