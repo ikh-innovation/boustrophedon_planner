@@ -1,6 +1,6 @@
 <launch>
 
-    <include file="$(find aristos_maps)/launch/multiple_maps.launch" />
+    <!-- <include file="$(find aristos_maps)/launch/multiple_maps.launch" /> -->
 
     <node pkg="boustrophedon_server" type="boustrophedon_planner_server" name="boustrophedon_server"  output="screen" respawn="true" >
         <!-- outline parameters -->

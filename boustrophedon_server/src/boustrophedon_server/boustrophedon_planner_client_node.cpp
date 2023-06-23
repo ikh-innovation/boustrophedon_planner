@@ -3,6 +3,7 @@
 #include <actionlib/client/simple_action_client.h>
 #include <actionlib/client/terminal_state.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2/LinearMath/Quaternion.h>
 
 #include <boustrophedon_msgs/PlanMowingPathAction.h>
 #include <boustrophedon_msgs/ConvertPlanToPath.h>
@@ -13,6 +14,7 @@
 #include <geometry_msgs/PointStamped.h>
 
 geometry_msgs::Quaternion headingToQuaternion(double x, double y, double z);
+double quaternionToYaw(geometry_msgs::Quaternion quaternion);
 
 // server has a service to convert StripingPlan to Path, but all it does it call this method
 bool convertStripingPlanToPath(const boustrophedon_msgs::StripingPlan& striping_plan, nav_msgs::Path& path)
@@ -121,6 +123,21 @@ void addPolygonPointCallback(const geometry_msgs::PointStampedConstPtr new_point
   ROS_INFO("Total point number is : %i", point_num);
 }
 
+double quaternionToYaw(geometry_msgs::Quaternion quaternion)
+{
+  tf2::Quaternion q(
+    quaternion.x,
+    quaternion.y,
+    quaternion.z,
+    quaternion.w);
+  
+  tf2::Matrix3x3 m(q);
+  double r,p,y ;
+  m.getRPY(r,p,y);
+  return y;
+}
+
+
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "boustrophedon_planner_client");
@@ -209,23 +226,51 @@ int main(int argc, char** argv)
       std::vector<double> path_y {};
       std::vector<double> path_yaw {};
       std::vector<double> path_back_ind {};
+      std::vector<double> path_origin {};
 
       double start_x {path.poses.front().pose.position.x}; 
+      path_origin.push_back(start_x);
       double start_y {path.poses.front().pose.position.y};
-      double start_yaw {};
+      path_origin.push_back(start_y);      
 
-      for (int i=0; i < result->plan.points.size(); i++)
-      {
-        path_x.push_back(path.poses[i].pose.position.x - start_x);
-        path_y.push_back(path.poses[i].pose.position.y - start_y);
-        path_yaw.push_back(0);
-        path_back_ind.push_back(0);
+      // create relative (map) vector of poses and check for possible duplicates
+      path_x.push_back(path.poses[0].pose.position.x - start_x);
+      path_y.push_back(path.poses[0].pose.position.y - start_y);
+      path_yaw.push_back(0);
+      path_back_ind.push_back(0);
+      for (int i=1; i < result->plan.points.size(); i++)
+      {       
+        double x{path.poses[i].pose.position.x - start_x};
+        double y{path.poses[i].pose.position.y - start_y};
+        if (( fabs(x-path_x.back()) > 0.0001 ) && ( fabs(y-path_y.back()) > 0.0001 ))
+        {
+          path_x.push_back(x);
+          path_y.push_back(y);
+          path_yaw.push_back(0);
+          path_back_ind.push_back(0);
+        }
       }
-      n.setParam("/aristos/move_base_flex/" + area_name + "/x_path", path_x);
-      n.setParam("/aristos/move_base_flex/" + area_name + "/y_path", path_y);
+      
+      // find yaw from two first points and then rotate the entire path
+      double dx{path_x[1] - path_x[0]};
+      double dy{path_y[1] - path_y[0]};
+      geometry_msgs::Quaternion quat{headingToQuaternion(dx, dy, 0.0)};
+      double start_yaw{quaternionToYaw(quat)};
+      path_origin.push_back(start_yaw);
+      std::vector<double> path_x_rot {};
+      std::vector<double> path_y_rot {};
+      for (int i=0; i < path_x.size(); i++)
+      {       
+        path_x_rot.push_back( cos(start_yaw)*path_x[i] + sin(start_yaw)*path_y[i]) ;
+        path_y_rot.push_back(-sin(start_yaw)*path_x[i] + cos(start_yaw)*path_y[i]);
+      }
+
+      n.setParam("/aristos/move_base_flex/" + area_name + "/x_path", path_x_rot);
+      n.setParam("/aristos/move_base_flex/" + area_name + "/y_path", path_y_rot);
       n.setParam("/aristos/move_base_flex/" + area_name + "/yaw_path", path_yaw);
       n.setParam("/aristos/move_base_flex/" + area_name + "/back_ind", path_back_ind);
-
+      n.setParam("/aristos/move_base_flex/" + area_name + "/path_origin", path_origin);
+      
       all_paths.push_back(path);
       for (auto p : all_paths){
         
