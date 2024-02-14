@@ -8,14 +8,41 @@ void StripingPlanner::setParameters(StripingPlanner::Parameters parameters)
   params_ = parameters;
 }
 
-void StripingPlanner::addToPath(const Polygon& polygon, const Polygon& sub_polygon, Point& robot_position,
+void StripingPlanner::addToPath(const Polygon& whole_polygon, const Polygon& polygon, const Polygon& sub_polygon, Point& robot_position,
                                 std::vector<NavPoint>& path)
 {
-  std::vector<NavPoint> new_path_section;
 
+  std::vector<NavPoint> new_path_section;
   fillPolygon(sub_polygon, new_path_section, robot_position);
 
-  if (params_.travel_along_boundary)
+  // Need to check if travelling to next polygon will cross free space. If yes,
+  // the path has to be calculated with travel_along_boundary set to True,
+  // regardless of user selection.
+  bool override_travel {false};
+  
+  if ((!params_.travel_along_boundary) && (!on_first_poly_))
+  { 
+    double incl { (new_path_section.front().point.y() - robot_position.y())/(new_path_section.front().point.x() - robot_position.x())}; 
+    for (double x_coord = std::min(new_path_section.front().point.x(), robot_position.x()) ; x_coord < std::max(new_path_section.front().point.x(), robot_position.x()); x_coord = x_coord + 0.1)
+    {
+      double y_coord {incl*(x_coord - new_path_section.front().point.x()) + new_path_section.front().point.y()};
+      Point midpoint {x_coord, y_coord };
+      if (CGAL::bounded_side_2(whole_polygon.vertices_begin(), whole_polygon.vertices_end(), midpoint) == CGAL::ON_UNBOUNDED_SIDE)
+      {
+        // std::cout << "Point is outside the polygon.\n";
+        override_travel = true ;
+        break;
+      }
+    }
+  }
+  else
+  {
+    on_first_poly_ = false ;
+  }
+
+  std::vector<Point> starting_points = getIntersectionPoints(polygon, Line(robot_position, new_path_section.front().point));
+
+  if ((params_.travel_along_boundary) || (override_travel))
   {
     std::vector<NavPoint> start_to_striping =
         getOutlinePathToPoint(polygon, robot_position, new_path_section.front().point);
@@ -43,27 +70,86 @@ void StripingPlanner::fillPolygon(const Polygon& polygon, std::vector<NavPoint>&
   auto min_x = left_vertex.x();
   auto max_x = CGAL::right_vertex_2(polygon.container().begin(), polygon.container().end())->x();
 
-  auto stripe_count = static_cast<int>(std::round(CGAL::to_double(max_x - min_x) / params_.stripe_separation)) + 1;
+  // auto stripe_count = static_cast<int>(std::round(CGAL::to_double(max_x - min_x) / stripe_separation)) + 1;
 
+  double stripe_count{};
+  // ---------------------------------------------------------------------------------------------------------------
+  bool DB {false};
+  // Width of cutting tools
+  double w_c {1.0};
+  // Corridor width
+  double lat_dist {CGAL::to_double(max_x - min_x)}; 
+  if (lat_dist < w_c)
+  {
+    if (DB) std::cout << "Available lateral area distance smaller than width of cutting tools. Will pass once in the middle." << std::endl;
+    stripe_separation = params_.max_stripe_separation;
+    stripe_count = 1 ;
+  }
+  else
+  {
+    // Maximum step size. Areas' overlap value can be calculated by (w_c-step) or ((w_c - step)/w_c) as a percentage.
+    // We set a maximum step size to ensure a minimum overlap value.
+    double step_max {params_.max_stripe_separation};
+    if (step_max > w_c)
+    {
+      if (DB) std::cout << "Erroneous maximum step definition, larger than the cut width. Reducing to cut width to ensure there is marginal overlap between passes." << std::endl;
+      // Even better, reduce it to a percentage of the cut width, for example 0.9*w_c
+      step_max = w_c;
+    }
+    // To find the optimum pass number, divide the width by the maximum step size and round up the result to the closest higher integer.
+    // For example, 5.37 passes mean that we should do 6. If we did 5, the actual step size would increase further. 
+    
+    if (step_max != 0.0)
+    {
+      stripe_count = std::ceil((lat_dist  )/step_max) + 1.0 ;
+    }
+    else
+    {
+      if (DB) std::cout << "Erroneous maximum step definition, equal to 0. Check input values." << std::endl;
+    }
+
+    if (DB) std::cout <<"Calculated number of passes: " << stripe_count << std::endl;
+        
+    // Then calculate the actual step size that will be used based on the pass number value.
+    if ((stripe_count - 1.0) != 0.0)
+    {
+      stripe_separation = {(lat_dist)/(stripe_count - 1.0)};
+    }
+    else
+    {
+      if (DB) std::cout << "A single pass is required." << std::endl;
+    }
+    if (DB) std::cout << "Optimum onepass step is: " << stripe_separation << std::endl;
+    // ---------------------------------------------------------------------------------------------------------------
+  }
+
+  
   StripingDirection stripe_dir = StripingDirection::STARTING;
 
   bool left_closest = isLeftClosest(polygon, robot_position, min_x, max_x);
   for (auto stripe_num = 0; stripe_num < stripe_count; stripe_num++)
   {
+    if (DB) std::cout << "Stripe number " << stripe_num + 1 <<  std::endl;
     double x;
     if (left_closest)
     {
-      x = min_x + (stripe_num * params_.stripe_separation);
+      x = min_x + (stripe_num * stripe_separation);
     }
     else
     {
-      x = max_x - (stripe_num * params_.stripe_separation);
+      x = max_x - (stripe_num * stripe_separation);
+    }
+
+    if (stripe_count == 1)
+    {
+      if (DB) std::cout << "Halfing X" << std::endl;
+      x = (max_x + min_x)/2.0;
     }
 
     auto intersections = getIntersectionPoints(polygon, Line(Point(x, 0.0), Point(x, 1.0)));
-
+    if (DB)  std::cout << intersections.size() << std::endl;
     if (intersections.size() > 1)
-    {
+    {      
       // lambda for determining the first striping direction naively
       auto compare_current_point_distance = [&robot_position](const auto& a, const auto& b) {
         auto comp = CGAL::compare_distance_to_point(robot_position, a, b);
@@ -138,6 +224,23 @@ void StripingPlanner::fillPolygon(const Polygon& polygon, std::vector<NavPoint>&
       // reverse the striping direction for the next stripe
       stripe_dir = stripe_dir == StripingDirection::UP ? StripingDirection::DOWN : StripingDirection::UP;
     }
+    else
+    {
+      if (stripe_num == 0)
+      {
+        if (DB)  std::cout << "no intersections at start" << std::endl;
+        path.emplace_back(PointType::StripeEnd, intersections.back());
+      }
+      else if (stripe_num == (stripe_count - 1))
+      {
+        if (DB)  std::cout << "no intersections at end" << std::endl;
+        path.emplace_back(PointType::StripeEnd, intersections.back());
+      }
+      else
+      {
+        if (DB)  std::cout << "should not be here" << std::endl;
+      }
+    }
   }
 }
 
@@ -151,7 +254,6 @@ void StripingPlanner::addIntermediaryPoints(std::vector<Point>& intersections)
 
   int intermediary_count =
       static_cast<int>(std::trunc((upper_point.y() - lower_point.y()) / params_.intermediary_separation));
-
   // start the loop at 1. We don't want to repeat a point on the ends of the line segment.
   for (int i = 1; i < intermediary_count; i++)
   {
@@ -212,10 +314,10 @@ void StripingPlanner::addHalfYTurnPoints(std::vector<NavPoint>& path, const Poin
 
       // the arc is centered around a point in the previous stripe
       arc_center_point =
-          Point(path.back().point.x(), path.back().point.y() + params_.turn_start_offset - params_.stripe_separation);
+          Point(path.back().point.x(), path.back().point.y() + params_.turn_start_offset - stripe_separation);
 
       // For this case, we'll use a circular arc, starting from PI/2 and ending at 0 (left to right, higher to lower)
-      arc = generateDiscretizedArc(arc_center_point, params_.stripe_separation, CGAL_PI / 2, 0.0,
+      arc = generateDiscretizedArc(arc_center_point, stripe_separation, CGAL_PI / 2, 0.0,
                                    params_.points_per_turn);
 
       // the first point in the arc is the zero-turn point, make it end the stripe
@@ -229,10 +331,10 @@ void StripingPlanner::addHalfYTurnPoints(std::vector<NavPoint>& path, const Poin
 
       // the arc is centered around a point in the current stripe
       arc_center_point =
-          Point(next_stripe_start.x(), next_stripe_start.y() + params_.turn_start_offset - params_.stripe_separation);
+          Point(next_stripe_start.x(), next_stripe_start.y() + params_.turn_start_offset - stripe_separation);
 
       // For this case, we'll use a circular arc, starting from PI and ending at PI/2 (left to right, lower to higher)
-      arc = generateDiscretizedArc(arc_center_point, params_.stripe_separation, CGAL_PI, CGAL_PI / 2,
+      arc = generateDiscretizedArc(arc_center_point, stripe_separation, CGAL_PI, CGAL_PI / 2,
                                    params_.points_per_turn);
 
       // the last point in the arc is the zero-turn point, make it end the stripe
@@ -253,10 +355,10 @@ void StripingPlanner::addHalfYTurnPoints(std::vector<NavPoint>& path, const Poin
 
       // the arc is centered around a point in the previous stripe
       arc_center_point =
-          Point(path.back().point.x(), path.back().point.y() - params_.turn_start_offset + params_.stripe_separation);
+          Point(path.back().point.x(), path.back().point.y() - params_.turn_start_offset + stripe_separation);
 
       // For this case, we'll use a circular arc, starting from 3PI/2 and ending at 2PI (left to right, lower to higher)
-      arc = generateDiscretizedArc(arc_center_point, params_.stripe_separation, 3 * CGAL_PI / 2, CGAL_PI * 2,
+      arc = generateDiscretizedArc(arc_center_point, stripe_separation, 3 * CGAL_PI / 2, CGAL_PI * 2,
                                    params_.points_per_turn);
 
       // the first point in the arc is the zero-turn point, make it end the stripe
@@ -270,10 +372,10 @@ void StripingPlanner::addHalfYTurnPoints(std::vector<NavPoint>& path, const Poin
 
       // the arc is centered around a point in the current stripe
       arc_center_point =
-          Point(next_stripe_start.x(), next_stripe_start.y() - params_.turn_start_offset + params_.stripe_separation);
+          Point(next_stripe_start.x(), next_stripe_start.y() - params_.turn_start_offset + stripe_separation);
 
       // For this case, we'll use a circular arc, starting from PI and ending at 3PI/2 (left to right, higher to lower)
-      arc = generateDiscretizedArc(arc_center_point, params_.stripe_separation, CGAL_PI, 3 * CGAL_PI / 2,
+      arc = generateDiscretizedArc(arc_center_point, stripe_separation, CGAL_PI, 3 * CGAL_PI / 2,
                                    params_.points_per_turn);
 
       // the last point in the arc is the zero-turn point, make it end the stripe
@@ -294,10 +396,10 @@ void StripingPlanner::addHalfYTurnPoints(std::vector<NavPoint>& path, const Poin
 
       // the arc is centered around a point in the previous stripe
       arc_center_point =
-          Point(path.back().point.x(), path.back().point.y() + params_.turn_start_offset - params_.stripe_separation);
+          Point(path.back().point.x(), path.back().point.y() + params_.turn_start_offset - stripe_separation);
 
       // For this case, we'll use a circular arc, starting from PI/2 and ending at PI (right to left, higher to lower)
-      arc = generateDiscretizedArc(arc_center_point, params_.stripe_separation, CGAL_PI / 2, CGAL_PI,
+      arc = generateDiscretizedArc(arc_center_point, stripe_separation, CGAL_PI / 2, CGAL_PI,
                                    params_.points_per_turn);
 
       // the first point in the arc is the zero-turn point, make it end the stripe
@@ -311,10 +413,10 @@ void StripingPlanner::addHalfYTurnPoints(std::vector<NavPoint>& path, const Poin
 
       // the arc is centered around a point in the current stripe
       arc_center_point =
-          Point(next_stripe_start.x(), next_stripe_start.y() + params_.turn_start_offset - params_.stripe_separation);
+          Point(next_stripe_start.x(), next_stripe_start.y() + params_.turn_start_offset - stripe_separation);
 
       // For this case, we'll use a circular arc, starting from 0 and ending at PI/2 (right to left, lower to higher)
-      arc = generateDiscretizedArc(arc_center_point, params_.stripe_separation, 0.0, CGAL_PI / 2,
+      arc = generateDiscretizedArc(arc_center_point, stripe_separation, 0.0, CGAL_PI / 2,
                                    params_.points_per_turn);
 
       // the last point in the arc is the zero-turn point, make it end the stripe
@@ -335,10 +437,10 @@ void StripingPlanner::addHalfYTurnPoints(std::vector<NavPoint>& path, const Poin
 
       // the arc is centered around a point in the previous stripe
       arc_center_point =
-          Point(path.back().point.x(), path.back().point.y() - params_.turn_start_offset + params_.stripe_separation);
+          Point(path.back().point.x(), path.back().point.y() - params_.turn_start_offset + stripe_separation);
 
       // For this case, we'll use a circular arc, starting from 3PI/2 and ending at PI (right to left, lower to higher)
-      arc = generateDiscretizedArc(arc_center_point, params_.stripe_separation, 3 * CGAL_PI / 2, CGAL_PI,
+      arc = generateDiscretizedArc(arc_center_point, stripe_separation, 3 * CGAL_PI / 2, CGAL_PI,
                                    params_.points_per_turn);
 
       // the first point in the arc is the zero-turn point, make it end the stripe
@@ -352,10 +454,10 @@ void StripingPlanner::addHalfYTurnPoints(std::vector<NavPoint>& path, const Poin
 
       // the arc is centered around a point in the current stripe
       arc_center_point =
-          Point(next_stripe_start.x(), next_stripe_start.y() - params_.turn_start_offset + params_.stripe_separation);
+          Point(next_stripe_start.x(), next_stripe_start.y() - params_.turn_start_offset + stripe_separation);
 
       // For this case, we'll use a circular arc, starting from 2PI and ending at 3PI/2 (right to left, higher to lower)
-      arc = generateDiscretizedArc(arc_center_point, params_.stripe_separation, CGAL_PI * 2, 3 * CGAL_PI / 2,
+      arc = generateDiscretizedArc(arc_center_point, stripe_separation, CGAL_PI * 2, 3 * CGAL_PI / 2,
                                    params_.points_per_turn);
 
       // the last point in the arc is the zero-turn point, make it end the stripe

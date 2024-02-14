@@ -7,6 +7,18 @@ and returns a `StripingPlan` message which contains a list of waypoints to strip
 
 ![Sample Boustrophedon Plan](half-y-turn-concave.png)
 
+### Instructions
+
+run the server using:
+```
+roslaunch boustrophedon_server boustrophedon_server.launch
+```
+In its current form, the launch file requires the IKH ```aristos_maps``` package to load an actual map and run. Replace it if necessary.
+
+In the Rviz window publish as many points as desired to form a polygon. Then, publish a pose estimate that corresponds to the robot's initial position. The orientation defined is the orientation of the produced stripes, if of course the relative flag is activated.
+
+After the path is produced, the user is asked to input a name for this area. It is suggested to use a unique name that has some logical connection with the area. A list with the names the user has already used appears for convenience. After selecting and typing the name press enter to finalize the process and input the next polygon. The path is saved in the parameter server, from where it can be accessed or dumped in a YAML file.  
+
 ## Changelog
 
 - January 23, 2020:
